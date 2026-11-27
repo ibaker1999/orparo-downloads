@@ -1,0 +1,47 @@
+# Keeps the website's Download button working.
+# orparo.com links to releases/latest/download/Orparo.dmg, so every release must also carry
+# its DMG under the stable name Orparo.dmg. This copies Orparo-X.Y.Z.dmg to Orparo.dmg on
+# every published release (and on demand), then checks the copy is byte-identical and the link works.
+name: Stable Orparo.dmg
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (blank = latest)"
+        required: false
+permissions:
+  contents: write
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Copy versioned DMG to Orparo.dmg
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG_IN: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          set -euo pipefail
+          TAG="${TAG_IN:-$(gh release view --repo "$REPO" --json tagName -q .tagName)}"
+          VER="${TAG#v}"
+          mkdir -p out
+          gh release download "$TAG" --repo "$REPO" --pattern "Orparo-${VER}.dmg" --dir out
+          cp "out/Orparo-${VER}.dmg" out/Orparo.dmg
+          gh release upload "$TAG" out/Orparo.dmg --repo "$REPO" --clobber
+          A=$(sha256sum "out/Orparo-${VER}.dmg" | cut -d' ' -f1)
+          rm -f out/Orparo.dmg
+          gh release download "$TAG" --repo "$REPO" --pattern "Orparo.dmg" --dir out --clobber
+          B=$(sha256sum out/Orparo.dmg | cut -d' ' -f1)
+          echo "versioned $A"; echo "stable    $B"
+          test "$A" = "$B"
+      - name: Check the website's link gives a file
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          sleep 20
+          OUT=$(curl -sL -r 0-0 -o /dev/null -w "%{http_code} %{url_effective}" "https://github.com/${REPO}/releases/latest/download/Orparo.dmg")
+          echo "$OUT"
+          case "$OUT" in 200*|206*) ;; *) echo "Download button link is broken"; exit 1;; esac
