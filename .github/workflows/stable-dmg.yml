@@ -4,6 +4,8 @@
 # every published release (and on demand), then checks the copy is byte-identical and the link works.
 name: Stable Orparo.dmg
 on:
+  schedule:
+    - cron: '23 * * * *'   # hourly off-Studio check of the Download button
   release:
     types: [published]
   workflow_dispatch:
@@ -15,6 +17,8 @@ permissions:
   contents: write
 jobs:
   copy:
+    # Beta/pre-releases never get Orparo.dmg (they must never become "latest").
+    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.release.prerelease }}
     runs-on: ubuntu-latest
     steps:
       - name: Copy versioned DMG to Orparo.dmg
@@ -26,6 +30,9 @@ jobs:
           set -euo pipefail
           TAG="${TAG_IN:-$(gh release view --repo "$REPO" --json tagName -q .tagName)}"
           VER="${TAG#v}"
+          echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "Refusing: $TAG is not a public release tag"; exit 1; }
+          LATEST=$(gh release view --repo "$REPO" --json tagName -q .tagName)
+          echo "$LATEST" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "ALERT: latest release is $LATEST (a beta?) - Download button would serve it"; exit 1; }
           mkdir -p out
           gh release download "$TAG" --repo "$REPO" --pattern "Orparo-${VER}.dmg" --dir out
           cp "out/Orparo-${VER}.dmg" out/Orparo.dmg
@@ -37,6 +44,7 @@ jobs:
           echo "versioned $A"; echo "stable    $B"
           test "$A" = "$B"
       - name: Check the website's link gives a file
+        if: always()
         env:
           REPO: ${{ github.repository }}
         run: |
